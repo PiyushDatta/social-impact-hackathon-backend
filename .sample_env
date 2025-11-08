@@ -1,0 +1,16 @@
+# Twilio Configuration
+TWILIO_ACCOUNT_SID=your_twilio_account_sid
+TWILIO_AUTH_TOKEN=your_twilio_auth_token
+TWILIO_PHONE_NUMBER=+1234567890
+
+# ElevenLabs Configuration
+ELEVENLABS_AGENT_ID=your_elevenlabs_agent_id
+ELEVENLABS_API_KEY=your_elevenlabs_agent_api
+ELEVENLABS_AGENT_PHONE_NUMBER_ID=your_elevenlabs_phone_number_id
+
+# Server Configuration
+PORT=8080
+#NODE_ENV=development
+#BASE_URL=https://myapp.loca.lt
+NODE_ENV=production
+BASE_URL=https://your-cloud-run-url.run.app
