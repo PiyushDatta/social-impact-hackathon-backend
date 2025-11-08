@@ -9,7 +9,13 @@ bun install
 To run:
 
 ```bash
-bun run index.ts
+bun run start
+```
+
+To run in one go:
+
+```bash
+bun run start:dev
 ```
 
 This project was created using `bun init` in bun v1.3.1. [Bun](https://bun.com) is a fast all-in-one JavaScript runtime.
@@ -17,7 +23,7 @@ This project was created using `bun init` in bun v1.3.1. [Bun](https://bun.com) 
 # How to run server:
 
 1. Copy .sample_env into .env and fill out the keys
- 
+
     - `cp .sample_env .env`
 
 2. Terminal 1:
