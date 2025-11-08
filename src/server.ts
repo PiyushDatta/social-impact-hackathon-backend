@@ -1,6 +1,7 @@
 import express, { Request, Response } from "express";
 import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
 import dotenv from "dotenv";
+import cors from "cors";
 
 interface ElevenLabsConversation {
     conversation_id: string;
@@ -36,6 +37,15 @@ if (process.env.NODE_ENV !== "production") {
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Enable CORS (allow localhost & Expo testing)
+app.use(
+    cors({
+        origin: "*", // allow all origins during development
+        methods: ["GET", "POST", "OPTIONS"],
+        allowedHeaders: ["Content-Type", "Authorization"],
+    })
+);
 
 // Environment variables validation
 const requiredEnvVars = Object.keys(process.env).filter(
