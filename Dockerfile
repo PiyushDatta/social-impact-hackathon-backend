@@ -12,6 +12,9 @@ RUN bun install --frozen-lockfile
 # Copy source code
 COPY . .
 
+# Set NODE_ENV before building so it's properly bundled
+ENV NODE_ENV=production
+
 # Build the application
 RUN bun run build
 
@@ -36,4 +39,4 @@ EXPOSE 8080
 ENV NODE_ENV=production
 
 # Start the application
-CMD ["bun", "run", "start"]
+CMD ["bun", "dist/server.js"]
