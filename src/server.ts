@@ -1,5 +1,4 @@
 import express, { Request, Response } from "express";
-import twilio from "twilio";
 import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
 import dotenv from "dotenv";
 
@@ -15,6 +14,7 @@ interface ElevenLabsConversation {
     call_duration_secs?: number;
     agent_id?: string;
 }
+
 interface ElevenLabsConversationsResponse {
     conversations: Array<{
         conversation_id: string;
@@ -26,14 +26,16 @@ interface ElevenLabsConversationsResponse {
 const app = express();
 const port = process.env.PORT || 8080;
 
+// Load .env file only in non-production environments
+if (process.env.NODE_ENV !== "production") {
+    dotenv.config();
+}
+
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Environment variables validation
-// Load .env file
-dotenv.config();
-// Automatically get all keys from process.env that match your naming convention
 const requiredEnvVars = Object.keys(process.env).filter(
     (key) =>
         key.startsWith("TWILIO_") ||
@@ -47,19 +49,19 @@ if (missingVars.length > 0) {
     );
 }
 
-// Initialize Twilio client
-const twilioClient = twilio(
-    process.env.TWILIO_ACCOUNT_SID,
-    process.env.TWILIO_AUTH_TOKEN
-);
-
 // Initialize ElevenLabs client
 const elevenLabsClient = new ElevenLabsClient({
     apiKey: process.env.ELEVENLABS_API_KEY,
 });
 
-// Store conversation IDs for tracking
-const callConversationMap = new Map<string, string>();
+// Root route for base URL access
+app.get("/", (req: Request, res: Response) => {
+    res.status(200).json({
+        status: "ok",
+        message: "Server is running",
+        environment: process.env.NODE_ENV || "development",
+    });
+});
 
 // Health check endpoint
 app.get("/health", (req: Request, res: Response) => {
@@ -118,9 +120,7 @@ app.get(
                 `https://api.elevenlabs.io/v1/convai/conversations/${conversationId}`,
                 {
                     method: "GET",
-                    headers: {
-                        "xi-api-key": process.env.ELEVENLABS_API_KEY!,
-                    },
+                    headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY! },
                 }
             );
             if (!response.ok) {
@@ -159,9 +159,7 @@ app.get("/conversations", async (req: Request, res: Response) => {
             `https://api.elevenlabs.io/v1/convai/conversations?agent_id=${agentId}`,
             {
                 method: "GET",
-                headers: {
-                    "xi-api-key": process.env.ELEVENLABS_API_KEY!,
-                },
+                headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY! },
             }
         );
         if (!response.ok) {
