@@ -24,7 +24,9 @@ interface ElevenLabsConversationsResponse {
 }
 
 const app = express();
+const host = process.env.HOST || "0.0.0.0";
 const port = process.env.PORT || 8080;
+const portNumber = typeof port === "string" ? parseInt(port, 10) : port;
 
 // Load .env file only in non-production environments
 if (process.env.NODE_ENV !== "production") {
@@ -183,28 +185,31 @@ app.get("/conversations", async (req: Request, res: Response) => {
 });
 
 // Start server
-app.listen(port, () => {
+app.listen(portNumber, host, () => {
     console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
     console.log(`BASE_URL: ${process.env.BASE_URL || "not set"}`);
+    console.log(`Server listening on ${host}:${portNumber}`);
+    console.log(`Server running on port ${portNumber}`);
     console.log("\n==================== Debugging ====================");
-    // Print all env vars for debugging (mask secrets)
-    const safeEnv = Object.fromEntries(
-        Object.entries(process.env).map(([k, v]) => [
-            k,
-            k.includes("KEY") ||
-            k.includes("SECRET") ||
-            k.includes("ID") ||
-            k.includes("TOKEN") ||
-            k.includes("PHONE_NUMBER")
-                ? "****"
-                : v,
-        ])
+    // Debugging: Print all process.env with masking
+    const maskedEnv = Object.fromEntries(
+        Object.entries(process.env).map(([key, value]) => {
+            // Mask sensitive values
+            const shouldMask =
+                key.includes("KEY") ||
+                key.includes("SECRET") ||
+                key.includes("ID") ||
+                key.includes("TOKEN") ||
+                key.includes("PHONE_NUMBER") ||
+                key.includes("PASSWORD") ||
+                key.includes("AUTH");
+
+            return [key, shouldMask ? "****" : value];
+        })
     );
-    console.log("Loaded environment variables:", safeEnv);
-    // Log all process.env keys (for debugging)
-    console.log("All process.env keys:", Object.keys(process.env));
+    console.log("All process.env variables:");
+    console.log(JSON.stringify(maskedEnv, null, 2));
     console.log("==================== Debugging ====================\n");
-    console.log(`Server running on port ${port}`);
 });
 
 export default app;
