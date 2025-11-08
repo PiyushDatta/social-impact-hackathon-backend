@@ -186,6 +186,7 @@ app.get("/conversations", async (req: Request, res: Response) => {
 app.listen(port, () => {
     console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
     console.log(`BASE_URL: ${process.env.BASE_URL || "not set"}`);
+    console.log("\n==================== Debugging ====================");
     // Print all env vars for debugging (mask secrets)
     const safeEnv = Object.fromEntries(
         Object.entries(process.env).map(([k, v]) => [
@@ -200,6 +201,9 @@ app.listen(port, () => {
         ])
     );
     console.log("Loaded environment variables:", safeEnv);
+    // Log all process.env keys (for debugging)
+    console.log("All process.env keys:", Object.keys(process.env));
+    console.log("==================== Debugging ====================\n");
     console.log(`Server running on port ${port}`);
 });
 
