@@ -211,5 +211,3 @@ app.listen(portNumber, host, () => {
     console.log(JSON.stringify(maskedEnv, null, 2));
     console.log("==================== Debugging ====================\n");
 });
-
-export default app;
