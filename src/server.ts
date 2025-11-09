@@ -2,6 +2,9 @@ import express, { Request, Response } from "express";
 import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
 import dotenv from "dotenv";
 import cors from "cors";
+import { LlmAgent, InMemoryRunner, GOOGLE_SEARCH } from "@google/adk";
+import { CHYP_INTAKE_PROMPT } from "./intakePrompts";
+import { v4 as uuidv4 } from "uuid";
 
 interface ElevenLabsConversation {
     conversation_id: string;
@@ -22,6 +25,12 @@ interface ElevenLabsConversationsResponse {
         agent_id: string;
         start_time_unix_secs: number;
     }>;
+}
+
+interface GetSessionRequest {
+    sessionId: string;
+    userId?: string;
+    appName?: string;
 }
 
 const app = express();
@@ -64,6 +73,84 @@ if (missingVars.length > 0) {
 // Initialize ElevenLabs client
 const elevenLabsClient = new ElevenLabsClient({
     apiKey: process.env.ELEVENLABS_API_KEY,
+});
+
+// Initialize Google llm agent (adk)
+const llmAgent = new LlmAgent({
+    name: "chyp_intake_agent",
+    description: "A compassionate intake assistant for homeless youth.",
+    model: "gemini-2.0-flash-exp",
+    tools: [GOOGLE_SEARCH],
+    instruction: CHYP_INTAKE_PROMPT,
+});
+
+const llmAgentRunner = new InMemoryRunner({
+    agent: llmAgent,
+    appName: llmAgent.name,
+});
+
+// Store active sessions in memory
+const llmAgentSessions: Record<string, string> = {}; // userId -> sessionId
+
+// Create a session for new users
+app.post("/chat/session", async (req: Request, res: Response) => {
+    try {
+        const userId = req.body.userId || uuidv4();
+        const appName = llmAgent.name;
+        // Create a session in the runner
+        const session = await llmAgentRunner.sessionService.createSession({
+            appName,
+            userId,
+        });
+        // Store it in the in-memory map
+        llmAgentSessions[userId] = session.id;
+        res.status(200).json({ sessionId: session.id, userId });
+    } catch (err: any) {
+        console.error("Error creating chat session:", err);
+        res.status(500).json({
+            error: "Failed to create session",
+            details: err.message,
+        });
+    }
+});
+
+// Handle a message exchange
+app.post("/chat/message", async (req: Request, res: Response) => {
+    try {
+        const { userId, sessionId, message } = req.body;
+        if (!userId || !sessionId || !message) {
+            return res.status(400).json({
+                error: "userId, sessionId, and message are required",
+            });
+        }
+        // Validate that the sessionId matches what we stored
+        const storedSessionId = llmAgentSessions[userId];
+        if (!storedSessionId || storedSessionId !== sessionId) {
+            return res.status(400).json({
+                error: "Invalid session ID",
+            });
+        }
+        const content = { role: "user", parts: [{ text: message }] };
+        let fullText = "";
+        for await (const event of llmAgentRunner.runAsync({
+            userId,
+            sessionId,
+            newMessage: content,
+        })) {
+            if (event.content?.parts?.[0]?.text) {
+                fullText += event.content.parts[0].text;
+            }
+        }
+        res.status(200).json({
+            reply: fullText || "I'm sorry, I couldn't process your message.",
+        });
+    } catch (err: any) {
+        console.error("Error in chat message:", err);
+        res.status(500).json({
+            error: "Failed to process chat message",
+            details: err.message,
+        });
+    }
 });
 
 // Root route for base URL access

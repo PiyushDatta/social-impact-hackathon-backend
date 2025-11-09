@@ -216,7 +216,73 @@ def get_transcript(conversation_id: str, base_url: str) -> bool:
         return False
 
 
-def test_full_flow(phone_number: str, base_url: str, actually_call: bool = False):
+def test_chat_session(base_url: str) -> Optional[str]:
+    """Test creating a chat session"""
+    print_header("Step 4a: Creating Chat Session")
+
+    try:
+        response = requests.post(f"{base_url}/chat/session", json={}, timeout=10)
+        print_response(response)
+
+        if response.status_code == 200:
+            data = response.json()
+            session_id = data.get("sessionId")
+            user_id = data.get("userId")
+
+            if session_id and user_id:
+                print_success(f"Chat session created!")
+                print_info(f"User ID: {user_id}")
+                print_info(f"Session ID: {session_id}")
+                return (user_id, session_id)
+            else:
+                print_error("Response missing sessionId or userId")
+                return None
+        else:
+            print_error(f"Failed to create session: {response.status_code}")
+            return None
+
+    except Exception as e:
+        print_error(f"Error creating chat session: {str(e)}")
+        return None
+
+
+def test_chat_message(base_url: str, user_id: str, session_id: str) -> bool:
+    """Test sending a chat message"""
+    print_header("Step 4b: Sending Chat Message")
+
+    message = "Hi there, I need help finding a youth shelter in Sacramento."
+
+    try:
+        payload = {"userId": user_id, "sessionId": session_id, "message": message}
+        response = requests.post(f"{base_url}/chat/message", json=payload, timeout=30)
+        print_response(response)
+
+        if response.status_code == 200:
+            data = response.json()
+            reply = data.get("reply")
+
+            if reply:
+                print_success("Received AI reply!")
+                print(f"\n{Colors.BOLD}Agent:{Colors.RESET} {reply}")
+                return True
+            else:
+                print_warning("No reply text found in response.")
+                return False
+        else:
+            print_error(f"Chat message request failed: {response.status_code}")
+            return False
+
+    except Exception as e:
+        print_error(f"Error sending chat message: {str(e)}")
+        return False
+
+
+def test_full_flow(
+    phone_number: str,
+    base_url: str,
+    actually_call: bool = False,
+    skip_calling: bool = False,
+) -> int:
     """Test the complete flow: call → monitor → transcript"""
     print(f"\n{Colors.BOLD}{Colors.BLUE}")
     print("╔═══════════════════════════════════════════════════════════════════╗")
@@ -227,6 +293,21 @@ def test_full_flow(phone_number: str, base_url: str, actually_call: bool = False
     print_info(f"Base URL: {base_url}")
     print_info(f"Phone Number: {phone_number}")
     print_info(f"Timestamp: {datetime.now().isoformat()}")
+
+    # Step 4 only: skip all call-related tests
+    if skip_calling:
+        print_header("Skipping Call Flow (--skip_calling)")
+        print_info("Running chat session and message tests only...\n")
+
+        chat_info = test_chat_session(base_url)
+        if chat_info:
+            user_id, session_id = chat_info
+            test_chat_message(base_url, user_id, session_id)
+            print_success("Chat test completed successfully (no calls made)")
+            return 0
+        else:
+            print_error("Chat test failed: could not create chat session")
+            return 1
 
     if not actually_call:
         print_warning("\nNot making actual call (use --actually-call flag)")
@@ -274,11 +355,20 @@ def test_full_flow(phone_number: str, base_url: str, actually_call: bool = False
     if success:
         print_header("Full Flow Test Complete!")
         print_success("Successfully tested: Call → Transcript")
+    else:
+        print_error("Could not retrieve transcript")
+        print_info("The conversation may still be processing. Try again in a minute.")
+        print_info(f"Or manually check: GET {base_url}/conversations")
+    # Step 4: Chat session and message testing
+    print_header("Step 4: Testing Chat Endpoints (/chat/session and /chat/message)")
+    chat_info = test_chat_session(base_url)
+    if chat_info:
+        user_id, session_id = chat_info
+        test_chat_message(base_url, user_id, session_id)
         return 0
+    else:
+        print_error("Chat message test because session creation failed")
 
-    print_error("Could not retrieve transcript")
-    print_info("The conversation may still be processing. Try again in a minute.")
-    print_info(f"Or manually check: GET {base_url}/conversations")
     return 1
 
 
@@ -301,27 +391,30 @@ Examples:
   python test_flow.py --url https://your-ngrok-url.ngrok.io --actually-call
         """,
     )
-
     parser.add_argument(
         "--url",
         default="http://localhost:8080",
         help="Base URL of the API (default: http://localhost:8080)",
     )
-
     parser.add_argument(
         "--phone",
         default="+1234567890",
         help="Phone number to call (default: +1234567890)",
     )
-
     parser.add_argument(
         "--actually-call", action="store_true", help="Actually make a phone call"
     )
-
+    parser.add_argument(
+        "--skip-calling",
+        action="store_true",
+        help="Skip all call-related tests and only test chat endpoints",
+    )
     args = parser.parse_args()
 
     # Run test
-    exit_code = test_full_flow(args.phone, args.url.rstrip("/"), args.actually_call)
+    exit_code = test_full_flow(
+        args.phone, args.url.rstrip("/"), args.actually_call, args.skip_calling
+    )
     sys.exit(exit_code)
 
 

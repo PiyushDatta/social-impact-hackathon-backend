@@ -8,6 +8,9 @@ ELEVENLABS_AGENT_ID=your_elevenlabs_agent_id
 ELEVENLABS_API_KEY=your_elevenlabs_agent_api
 ELEVENLABS_AGENT_PHONE_NUMBER_ID=your_elevenlabs_phone_number_id
 
+# Google cloud
+GEMINI_API_KEY=your_google_gemini_api_key
+
 # Server Configuration
 PORT=8080
 NODE_ENV=development

@@ -28,7 +28,7 @@ This project was created using `bun init` in bun v1.3.1. [Bun](https://bun.com) 
 
 2. Terminal 1:
 
-    - `bun run start`
+    - `bun run start:dev`
 
 3. Terminal 2:
 
@@ -36,3 +36,7 @@ This project was created using `bun init` in bun v1.3.1. [Bun](https://bun.com) 
 
 4. Terminal 3:
     - `python client_test.py --phone +1112223333 --actually-call --url https://myapp.loca.lt`
+
+**Optional - to test only chat AI functionality**
+
+-   `python client_test.py --skip-calling --url https://myapp.loca.lt`
