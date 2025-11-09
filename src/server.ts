@@ -30,10 +30,12 @@ interface ElevenLabsConversationsResponse {
     }>;
 }
 
-interface GetSessionRequest {
-    sessionId: string;
-    userId?: string;
-    appName?: string;
+interface UserProfile {
+    uid: string;
+    email: string;
+    name: string;
+    photo?: string;
+    createdAt?: number;
 }
 
 const app = express();
@@ -186,54 +188,55 @@ async function extractAndStoreFormDataInBackground({
     }
 }
 
-// Google authentication endpoint
-app.post("/auth/google", async (req, res) => {
+// Helper function to add or get user from database
+async function addOrGetUser(
+    profile: UserProfile
+): Promise<{ isNewUser: boolean; profile: UserProfile }> {
+    const userRef = db.collection("users").doc(profile.uid);
+    const userDoc = await userRef.get();
+    let isNewUser = false;
+    let userProfile: UserProfile;
+    if (!userDoc.exists) {
+        // Create profile for new user
+        isNewUser = true;
+        userProfile = {
+            ...profile,
+            createdAt: profile.createdAt || Date.now(),
+        };
+        await userRef.set(userProfile);
+    } else {
+        userProfile = userDoc.data() as UserProfile;
+    }
+    return { isNewUser, profile: userProfile };
+}
+
+// Add user endpoint
+app.post("/auth/add_user", async (req, res) => {
     try {
-        const { idToken } = req.body;
-        if (!idToken) {
-            return res.status(400).json({ error: "Missing idToken" });
+        const { uid, email, name, photo } = req.body;
+        // Validate required fields
+        if (!uid || !email || !name) {
+            return res.status(400).json({
+                error: "Missing required fields: uid, email, and name are required",
+            });
         }
-        // Verify Google token
-        const ticket = await googleClient.verifyIdToken({
-            idToken,
-            audience: process.env.GOOGLE_WEB_CLIENT_ID,
-        });
-        const payload = ticket.getPayload();
-        if (!payload || !payload.sub || !payload.email) {
-            return res.status(401).json({ error: "Invalid Google token" });
-        }
-        // Unique user id from google
-        const googleId = payload.sub;
-        const email = payload.email;
-        const name = payload.name || "";
-        const photo = payload.picture || "";
-        // Check if user exists in Firestore
-        const userRef = db.collection("users").doc(googleId);
-        const userDoc = await userRef.get();
-        let isNewUser = false;
-        let profile;
-        if (!userDoc.exists) {
-            // Create profile for new user
-            isNewUser = true;
-            profile = {
-                uid: googleId,
-                email,
-                name,
-                photo,
-                createdAt: Date.now(),
-            };
-            await userRef.set(profile);
-        } else {
-            profile = userDoc.data();
-        }
+        // Create profile
+        const profile: UserProfile = {
+            uid,
+            email,
+            name,
+            photo: photo || undefined,
+        };
+        // Add or get user from database
+        const { isNewUser, profile: userProfile } = await addOrGetUser(profile);
         return res.json({
             success: true,
             isNewUser,
-            profile,
+            profile: userProfile,
         });
     } catch (err: any) {
-        console.error("Google auth error:", err.message || err);
-        return res.status(500).json({ error: "Google authentication failed" });
+        console.error("Add user error:", err.message || err);
+        return res.status(500).json({ error: "Failed to add user" });
     }
 });
 
