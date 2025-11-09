@@ -5,6 +5,9 @@ import cors from "cors";
 import { LlmAgent, InMemoryRunner, GOOGLE_SEARCH } from "@google/adk";
 import { CHYP_INTAKE_PROMPT } from "./intakePrompts";
 import { v4 as uuidv4 } from "uuid";
+import { Firestore } from "@google-cloud/firestore";
+import { IntakeSessionDoc, IntakeFormData } from "./intakeFormData";
+import { OAuth2Client } from "google-auth-library";
 
 interface ElevenLabsConversation {
     conversation_id: string;
@@ -70,6 +73,12 @@ if (missingVars.length > 0) {
     );
 }
 
+// Initialize Firestore
+const db = new Firestore();
+
+// Initialize google auth client
+const googleClient = new OAuth2Client(process.env.GOOGLE_WEB_CLIENT_ID);
+
 // Initialize ElevenLabs client
 const elevenLabsClient = new ElevenLabsClient({
     apiKey: process.env.ELEVENLABS_API_KEY,
@@ -91,6 +100,142 @@ const llmAgentRunner = new InMemoryRunner({
 
 // Store active sessions in memory
 const llmAgentSessions: Record<string, string> = {}; // userId -> sessionId
+
+async function extractAndStoreFormDataInBackground({
+    userId,
+    sessionId,
+    message,
+    llmAgentRunner,
+}: {
+    userId: string;
+    sessionId: string;
+    message: string;
+    llmAgentRunner: any;
+}) {
+    try {
+        const extractionPrompt = `
+                Extract any structured intake form data from this message...
+
+                Message: "${message}"
+
+                Return strict JSON only.
+                `;
+        let result = "";
+        for await (const event of llmAgentRunner.runAsync({
+            userId,
+            sessionId,
+            newMessage: { role: "user", parts: [{ text: extractionPrompt }] },
+        })) {
+            if (event.content?.parts?.[0]?.text) {
+                result += event.content.parts[0].text;
+            }
+        }
+        let newData: IntakeFormData | null = null;
+        try {
+            newData = JSON.parse(result);
+        } catch (err) {
+            // skip background update
+            console.warn("Extraction returned invalid JSON:", result);
+            return;
+        }
+        const docRef = db.collection("intake_sessions").doc(sessionId);
+        const snap = await docRef.get();
+        // Safe init
+        let existing: IntakeSessionDoc = {};
+        if (snap.exists) {
+            const data = snap.data() as IntakeSessionDoc | undefined;
+            if (data) {
+                existing = data as any;
+            }
+        }
+        // Merge incoming extracted data with existing data
+        const merged: IntakeFormData = {
+            ...(existing.extractedData || {}),
+            ...(newData || {}),
+            extractedAt: Date.now(),
+            sessionId,
+        };
+        // Compute fields & completeness
+        const fields = Object.keys(merged);
+        const extractedFields = fields.filter(
+            (f) => merged[f as keyof IntakeFormData]
+        );
+        const missingFields = fields.filter(
+            (f) => !merged[f as keyof IntakeFormData]
+        );
+        const completeness = Math.floor(
+            (extractedFields.length / fields.length) * 100
+        );
+        const confidence = completeness;
+        await docRef.set(
+            {
+                userId,
+                sessionId,
+                extractedData: merged,
+                extractedFields,
+                missingFields,
+                completeness,
+                confidence,
+                lastUpdate: Date.now(),
+            },
+            { merge: true }
+        );
+        console.log("Background extraction completed");
+    } catch (err) {
+        console.error("Background extraction error:", err);
+    }
+}
+
+// Google authentication endpoint
+app.post("/auth/google", async (req, res) => {
+    try {
+        const { idToken } = req.body;
+        if (!idToken) {
+            return res.status(400).json({ error: "Missing idToken" });
+        }
+        // Verify Google token
+        const ticket = await googleClient.verifyIdToken({
+            idToken,
+            audience: process.env.GOOGLE_WEB_CLIENT_ID,
+        });
+        const payload = ticket.getPayload();
+        if (!payload || !payload.sub || !payload.email) {
+            return res.status(401).json({ error: "Invalid Google token" });
+        }
+        // Unique user id from google
+        const googleId = payload.sub;
+        const email = payload.email;
+        const name = payload.name || "";
+        const photo = payload.picture || "";
+        // Check if user exists in Firestore
+        const userRef = db.collection("users").doc(googleId);
+        const userDoc = await userRef.get();
+        let isNewUser = false;
+        let profile;
+        if (!userDoc.exists) {
+            // Create profile for new user
+            isNewUser = true;
+            profile = {
+                uid: googleId,
+                email,
+                name,
+                photo,
+                createdAt: Date.now(),
+            };
+            await userRef.set(profile);
+        } else {
+            profile = userDoc.data();
+        }
+        return res.json({
+            success: true,
+            isNewUser,
+            profile,
+        });
+    } catch (err: any) {
+        console.error("Google auth error:", err.message || err);
+        return res.status(500).json({ error: "Google authentication failed" });
+    }
+});
 
 // Create a session for new users
 app.post("/chat/session", async (req: Request, res: Response) => {
@@ -130,6 +275,7 @@ app.post("/chat/message", async (req: Request, res: Response) => {
                 error: "Invalid session ID",
             });
         }
+        // Run the AI reply
         const content = { role: "user", parts: [{ text: message }] };
         let fullText = "";
         for await (const event of llmAgentRunner.runAsync({
@@ -141,9 +287,19 @@ app.post("/chat/message", async (req: Request, res: Response) => {
                 fullText += event.content.parts[0].text;
             }
         }
+        // Immediately return the response to avoid delay
         res.status(200).json({
             reply: fullText || "I'm sorry, I couldn't process your message.",
         });
+        // Kick off async extraction task (does not block)
+        extractAndStoreFormDataInBackground({
+            userId,
+            sessionId,
+            message,
+            llmAgentRunner,
+        }).catch((err: any) =>
+            console.error("Background extraction failed:", err)
+        );
     } catch (err: any) {
         console.error("Error in chat message:", err);
         res.status(500).json({

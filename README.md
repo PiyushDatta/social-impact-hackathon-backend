@@ -35,8 +35,14 @@ This project was created using `bun init` in bun v1.3.1. [Bun](https://bun.com) 
     - `lt --port 8080 --subdomain myapp`
 
 4. Terminal 3:
+
     - `python client_test.py --phone +1112223333 --actually-call --url https://myapp.loca.lt`
 
 **Optional - to test only chat AI functionality**
 
 -   `python client_test.py --skip-calling --url https://myapp.loca.lt`
+
+5. Terminal 4:
+
+    - `python test_auth.py --client-id "YOUR_CLIENT_ID" --client-secret "YOUR_CLIENT_SECRET"
+`
