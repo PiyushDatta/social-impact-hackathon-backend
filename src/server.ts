@@ -191,23 +191,49 @@ async function extractAndStoreFormDataInBackground({
 // Helper function to add or get user from database
 async function addOrGetUser(
     profile: UserProfile
-): Promise<{ isNewUser: boolean; profile: UserProfile }> {
+): Promise<{ isNewUser: boolean; profile: UserProfile; profileData?: any }> {
     const userRef = db.collection("users").doc(profile.uid);
+    const profileRef = db.collection("profiles").doc(profile.uid);
     const userDoc = await userRef.get();
+    const profileDoc = await profileRef.get();
     let isNewUser = false;
     let userProfile: UserProfile;
+    let profileData: any = null;
     if (!userDoc.exists) {
-        // Create profile for new user
+        // Create user for new user
         isNewUser = true;
         userProfile = {
             ...profile,
             createdAt: profile.createdAt || Date.now(),
         };
         await userRef.set(userProfile);
+        // Create default profile data for new user
+        const defaultProfileData = {
+            userId: profile.uid,
+            onboardingComplete: false,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+        };
+        await profileRef.set(defaultProfileData);
+        profileData = defaultProfileData;
     } else {
         userProfile = userDoc.data() as UserProfile;
+        // Get existing profile data or create if missing
+        if (profileDoc.exists) {
+            profileData = profileDoc.data();
+        } else {
+            // User exists but profile doesn't - create default profile
+            const defaultProfileData = {
+                userId: profile.uid,
+                onboardingComplete: false,
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+            };
+            await profileRef.set(defaultProfileData);
+            profileData = defaultProfileData;
+        }
     }
-    return { isNewUser, profile: userProfile };
+    return { isNewUser, profile: userProfile, profileData };
 }
 
 // Add user endpoint
@@ -228,15 +254,94 @@ app.post("/auth/add_user", async (req, res) => {
             photo: photo || undefined,
         };
         // Add or get user from database
-        const { isNewUser, profile: userProfile } = await addOrGetUser(profile);
+        const {
+            isNewUser,
+            profile: userProfile,
+            profileData,
+        } = await addOrGetUser(profile);
         return res.json({
             success: true,
             isNewUser,
             profile: userProfile,
+            profileData,
         });
     } catch (err: any) {
         console.error("Add user error:", err.message || err);
         return res.status(500).json({ error: "Failed to add user" });
+    }
+});
+
+// Create or update user profile data
+app.post("/profile", async (req: Request, res: Response) => {
+    try {
+        const { userId, profileData } = req.body;
+        // Validate required fields
+        if (!userId) {
+            return res.status(400).json({
+                error: "userId is required",
+            });
+        }
+        if (!profileData || typeof profileData !== "object") {
+            return res.status(400).json({
+                error: "profileData object is required",
+            });
+        }
+        // Reference to the profile document
+        const profileRef = db.collection("profiles").doc(userId);
+        // Add metadata
+        const profileWithMetadata = {
+            ...profileData,
+            userId,
+            updatedAt: Date.now(),
+            createdAt: profileData.createdAt || Date.now(),
+        };
+        // Save to Firestore (merge with existing data)
+        await profileRef.set(profileWithMetadata, { merge: true });
+        res.status(200).json({
+            success: true,
+            message: "Profile data saved successfully",
+            profileData: profileWithMetadata,
+        });
+    } catch (err: any) {
+        console.error("Error saving profile data:", err);
+        res.status(500).json({
+            error: "Failed to save profile data",
+            details: err.message,
+        });
+    }
+});
+
+// Get user profile data
+app.get("/profile/:userId", async (req: Request, res: Response) => {
+    try {
+        const { userId } = req.params;
+        // Validate userId
+        if (!userId) {
+            return res.status(400).json({
+                error: "userId is required",
+            });
+        }
+        // Reference to the profile document
+        const profileRef = db.collection("profiles").doc(userId);
+        const profileDoc = await profileRef.get();
+        // Check if profile exists
+        if (!profileDoc.exists) {
+            return res.status(404).json({
+                error: "Profile not found",
+                userId,
+            });
+        }
+        const profileData = profileDoc.data();
+        res.status(200).json({
+            success: true,
+            profileData,
+        });
+    } catch (err: any) {
+        console.error("Error fetching profile data:", err);
+        res.status(500).json({
+            error: "Failed to fetch profile data",
+            details: err.message,
+        });
     }
 });
 
