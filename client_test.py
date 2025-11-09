@@ -250,7 +250,7 @@ def test_chat_message(base_url: str, user_id: str, session_id: str) -> bool:
     """Test sending a chat message"""
     print_header("Step 4b: Sending Chat Message")
 
-    message = "Hi there, I need help finding a youth shelter in Sacramento."
+    message = "Hi there, what are my profile details? Who are you?"
 
     try:
         payload = {"userId": user_id, "sessionId": session_id, "message": message}

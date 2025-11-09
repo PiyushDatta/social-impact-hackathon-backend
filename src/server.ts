@@ -103,22 +103,25 @@ const llmAgentRunner = new InMemoryRunner({
 // Store active sessions in memory
 const llmAgentSessions: Record<string, string> = {}; // userId -> sessionId
 
+// In-memory storage for session state
+const llmAgentStates: Record<string, any> = {}; // userId -> state
+
 async function extractAndStoreFormDataInBackground({
     userId,
     sessionId,
-    message,
+    contentText,
     llmAgentRunner,
 }: {
     userId: string;
     sessionId: string;
-    message: string;
+    contentText: string;
     llmAgentRunner: any;
 }) {
     try {
         const extractionPrompt = `
                 Extract any structured intake form data from this message...
 
-                Message: "${message}"
+                Message: "${contentText}"
 
                 Return strict JSON only.
                 `;
@@ -351,10 +354,31 @@ app.post("/chat/session", async (req: Request, res: Response) => {
     try {
         const userId = req.body.userId || uuidv4();
         const appName = llmAgent.name;
+        // Get profile from Firestore
+        const profileRef = db.collection("profiles").doc(userId);
+        const profileDoc = await profileRef.get();
+        let profileData: Record<string, any> = {};
+        if (profileDoc.exists) {
+            profileData = profileDoc.data() || {};
+        }
+        // Prepare initial session state with user profile
+        const initialState = {
+            userProfile: {
+                name: profileData.name || null,
+                age: profileData.age || null,
+                background: profileData.background || null,
+                history: profileData.history || null,
+                ...profileData,
+            },
+            promptContext: `This is the user's profile data: ${JSON.stringify(
+                profileData
+            )}. They can ask for this information, feel free to share it with them. Use this information to respond kindly and thoughtfully.`,
+        };
         // Create a session in the runner
         const session = await llmAgentRunner.sessionService.createSession({
             appName,
             userId,
+            state: initialState,
         });
         // Store it in the in-memory map
         llmAgentSessions[userId] = session.id;
@@ -384,8 +408,29 @@ app.post("/chat/message", async (req: Request, res: Response) => {
                 error: "Invalid session ID",
             });
         }
+        // Only fetch profile on first message
+        let sessionState = llmAgentStates[userId];
+        let contentText: string;
+        if (!sessionState) {
+            const profileRef = db.collection("profiles").doc(userId);
+            const profileDoc = await profileRef.get();
+            const profileData = profileDoc.exists ? profileDoc.data() : {};
+            sessionState = {
+                userProfile: profileData,
+                promptContext: `This is the user's profile data: ${JSON.stringify(
+                    profileData
+                )}. They can ask for this information, feel free to share it with them. Use this information to respond kindly and thoughtfully.`,
+            };
+            // Save state in memory
+            llmAgentStates[userId] = sessionState;
+            // Prepend the profile prompt to the first message
+            contentText = `${sessionState.promptContext}\n\nUser message: ${message}`;
+        } else {
+            // Just send the message without profile data
+            contentText = message;
+        }
         // Run the AI reply
-        const content = { role: "user", parts: [{ text: message }] };
+        const content = { role: "user", parts: [{ text: contentText }] };
         let fullText = "";
         for await (const event of llmAgentRunner.runAsync({
             userId,
@@ -404,7 +449,7 @@ app.post("/chat/message", async (req: Request, res: Response) => {
         extractAndStoreFormDataInBackground({
             userId,
             sessionId,
-            message,
+            contentText,
             llmAgentRunner,
         }).catch((err: any) =>
             console.error("Background extraction failed:", err)
