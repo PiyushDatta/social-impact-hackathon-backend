@@ -602,6 +602,39 @@ app.get("/conversations/user/:userId", async (req: Request, res: Response) => {
     }
 });
 
+// Save conversation ID for a user
+app.post("/conversations/save", async (req: Request, res: Response) => {
+    try {
+        const { conversationId, userId } = req.body;
+        if (!conversationId || !userId) {
+            return res.status(400).json({
+                error: "conversationId and userId are required",
+            });
+        }
+        // Save to Firestore
+        const conversationRef = db
+            .collection("conversation_ids")
+            .doc(conversationId);
+        await conversationRef.set({
+            conversationId,
+            userId,
+            createdAt: Date.now(),
+        });
+        // console.log(`Saved conversation ${conversationId} for user ${userId}`);
+        res.status(200).json({
+            success: true,
+            message: "Conversation saved successfully",
+            conversationId,
+        });
+    } catch (error: any) {
+        console.error("Error saving conversation:", error);
+        res.status(500).json({
+            error: "Failed to save conversation",
+            details: error.message,
+        });
+    }
+});
+
 // Delete a conversation ID from Firestore
 app.delete(
     "/conversations/:conversationId",
