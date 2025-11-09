@@ -315,6 +315,7 @@ app.post("/profile", async (req: Request, res: Response) => {
 app.get("/profile/:userId", async (req: Request, res: Response) => {
     try {
         const { userId } = req.params;
+
         // Validate userId
         if (!userId) {
             return res.status(400).json({
@@ -437,7 +438,7 @@ app.get("/health", (req: Request, res: Response) => {
 // Endpoint to initiate a call using ElevenLabs
 app.post("/call", async (req: Request, res: Response) => {
     try {
-        const { phoneNumber } = req.body;
+        const { phoneNumber, userId } = req.body;
         if (!phoneNumber) {
             return res.status(400).json({ error: "Phone number is required" });
         }
@@ -458,6 +459,30 @@ app.post("/call", async (req: Request, res: Response) => {
                 toNumber: phoneNumber,
             });
         console.log("ElevenLabs call response:", response);
+        // Save conversation ID to Firestore if userId is provided
+        if (userId && response.conversationId) {
+            try {
+                const conversationRef = db
+                    .collection("conversation_ids")
+                    .doc(response.conversationId);
+                await conversationRef.set({
+                    conversationId: response.conversationId,
+                    userId,
+                    phoneNumber,
+                    callSid: response.callSid,
+                    createdAt: Date.now(),
+                });
+                console.log(
+                    `Saved conversation ${response.conversationId} for user ${userId}`
+                );
+            } catch (dbError) {
+                console.error(
+                    "Failed to save conversation to Firestore:",
+                    dbError
+                );
+                // Continue even if DB save fails
+            }
+        }
         res.status(200).json({
             success: true,
             callId: response.callSid,
@@ -544,6 +569,79 @@ app.get("/conversations", async (req: Request, res: Response) => {
         });
     }
 });
+
+// Get user's conversation IDs from Firestore
+app.get("/conversations/user/:userId", async (req: Request, res: Response) => {
+    try {
+        const { userId } = req.params;
+        if (!userId) {
+            return res.status(400).json({
+                error: "userId is required",
+            });
+        }
+        const conversationsRef = db.collection("conversation_ids");
+        const snapshot = await conversationsRef
+            .where("userId", "==", userId)
+            .orderBy("createdAt", "desc")
+            .get();
+        const conversations = snapshot.docs.map((doc) => ({
+            id: doc.id,
+            ...doc.data(),
+        }));
+        res.status(200).json({
+            success: true,
+            conversations,
+            total: conversations.length,
+        });
+    } catch (error: any) {
+        console.error("Error fetching user conversations:", error);
+        res.status(500).json({
+            error: "Failed to fetch user conversations",
+            details: error.message,
+        });
+    }
+});
+
+// Delete a conversation ID from Firestore
+app.delete(
+    "/conversations/:conversationId",
+    async (req: Request, res: Response) => {
+        try {
+            const { conversationId } = req.params;
+            const { userId } = req.body;
+            if (!conversationId) {
+                return res.status(400).json({
+                    error: "conversationId is required",
+                });
+            }
+            const conversationRef = db
+                .collection("conversation_ids")
+                .doc(conversationId);
+            const doc = await conversationRef.get();
+            // Verify the conversation belongs to the user
+            if (doc.exists && userId) {
+                const data = doc.data();
+                if (data?.userId !== userId) {
+                    return res.status(403).json({
+                        error: "Unauthorized to delete this conversation",
+                    });
+                }
+            }
+            await conversationRef.delete();
+            res.status(200).json({
+                success: true,
+                message: "Conversation deleted successfully",
+                conversationId,
+            });
+        } catch (error: any) {
+            console.error("Error deleting conversation:", error);
+            res.status(500).json({
+                error: "Failed to delete conversation",
+                details: error.message,
+            });
+        }
+    }
+);
 
 // Start server
 app.listen(portNumber, host, () => {
