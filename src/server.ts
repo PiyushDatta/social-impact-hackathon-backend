@@ -90,7 +90,7 @@ const elevenLabsClient = new ElevenLabsClient({
 const llmAgent = new LlmAgent({
   name: "chyp_intake_agent",
   description: "A compassionate intake assistant for homeless youth.",
-  model: "gemini-2.0-flash-exp",
+  model: "gemini-2.5-flash",
   tools: [GOOGLE_SEARCH],
   instruction: CHYP_INTAKE_PROMPT,
 });
