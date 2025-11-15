@@ -1009,13 +1009,36 @@ app.get(
     }
 );
 
+// In-memory store for latest auth
+let latestAuth: any = null;
+
 app.get("/auth/callback", (req, res) => {
     const { auth, user, profile } = req.query;
-    // Just show the values so we can debug
-    res.send(`
-    <h1>OAuth Callback Received</h1>
-    <pre>${JSON.stringify({ auth, user, profile }, null, 2)}</pre>
+    latestAuth = {
+        receivedAt: Date.now(),
+        auth,
+        user: user ? JSON.parse(decodeURIComponent(user)) : null,
+        profile: profile ? JSON.parse(decodeURIComponent(profile)) : null,
+    };
+    return res.send(`
+    <html>
+      <body style="font-family: sans-serif; text-align: center; padding-top: 40px;">
+        <h2>Login Complete</h2>
+        <p>You may now close this window.</p>
+      </body>
+    </html>
   `);
+});
+
+// Endpoint for test script to poll
+app.get("/auth/get-auth", (req, res) => {
+    if (!latestAuth) {
+        return res.json({ ready: false });
+    }
+    return res.json({
+        ready: true,
+        data: latestAuth,
+    });
 });
 
 // Get current user session
