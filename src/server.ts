@@ -995,9 +995,8 @@ app.get(
             const profileParam = encodeURIComponent(
                 JSON.stringify(profileData)
             );
-
             res.redirect(
-                `${process.env.BASE_URL}/?auth=success&user=${userParam}&profile=${profileParam}`
+                `${process.env.BASE_URL}/auth/callback?auth=success&user=${userParam}&profile=${profileParam}`
             );
         } catch (error: any) {
             console.error("[OAuth Callback] Error:", error);
@@ -1009,6 +1008,15 @@ app.get(
         }
     }
 );
+
+app.get("/auth/callback", (req, res) => {
+    const { auth, user, profile } = req.query;
+    // Just show the values so we can debug
+    res.send(`
+    <h1>OAuth Callback Received</h1>
+    <pre>${JSON.stringify({ auth, user, profile }, null, 2)}</pre>
+  `);
+});
 
 // Get current user session
 app.get("/auth/me", (req, res) => {
