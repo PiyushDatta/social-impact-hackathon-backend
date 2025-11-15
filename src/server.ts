@@ -114,11 +114,11 @@ const sessionConfig: session.SessionOptions = {
     resave: false,
     saveUninitialized: false,
     cookie: {
-        secure: isProd, // keep true in prod
+        secure: false,
         httpOnly: true,
         maxAge: 24 * 60 * 60 * 1000,
         // allow the cookie to be sent back through the proxy
-        sameSite: isProd ? "none" : "lax",
+        sameSite: "lax",
     },
     // trust the proxy (Cloud Run / local-tunnel)
     proxy: true,
