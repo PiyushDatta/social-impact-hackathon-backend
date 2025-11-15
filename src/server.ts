@@ -905,18 +905,56 @@ app.delete(
 
 // Returns the Google OAuth URL (for test script)
 app.get("/auth/google/url", (req, res) => {
-    const rootUrl = "https://accounts.google.com/o/oauth2/v2/auth";
-    const options = {
-        client_id: process.env.GOOGLE_WEB_CLIENT_ID,
-        redirect_uri: `${process.env.BASE_URL}/auth/google/callback`,
-        access_type: "offline",
-        response_type: "code",
-        prompt: "consent",
-        scope: ["profile", "email"].join(" "),
-    };
-    const qs = new URLSearchParams(options).toString();
-    const authUrl = `${rootUrl}?${qs}`;
-    res.json({ authUrl });
+    try {
+        const baseUrl = process.env.BASE_URL;
+        const clientId = process.env.GOOGLE_WEB_CLIENT_ID;
+        console.log("=== OAuth URL Generation ===");
+        console.log("BASE_URL:", baseUrl);
+        console.log(
+            "CLIENT_ID:",
+            clientId ? `${clientId.substring(0, 20)}...` : "MISSING"
+        );
+        if (!baseUrl) {
+            console.error("BASE_URL is not set!");
+            return res.status(500).json({
+                error: "Server configuration error: BASE_URL not set",
+            });
+        }
+        if (!clientId) {
+            console.error("GOOGLE_WEB_CLIENT_ID is not set!");
+            return res.status(500).json({
+                error: "Server configuration error: GOOGLE_WEB_CLIENT_ID not set",
+            });
+        }
+        const rootUrl = "https://accounts.google.com/o/oauth2/v2/auth";
+        const redirectUri = `${baseUrl}/auth/google/callback`;
+        const options = {
+            client_id: clientId,
+            redirect_uri: redirectUri,
+            access_type: "offline",
+            response_type: "code",
+            prompt: "consent",
+            scope: [
+                "https://www.googleapis.com/auth/userinfo.profile",
+                "https://www.googleapis.com/auth/userinfo.email",
+            ].join(" "),
+        };
+        console.log("Redirect URI:", redirectUri);
+        console.log("Scope:", options.scope);
+        const qs = new URLSearchParams(options as any).toString();
+        const authUrl = `${rootUrl}?${qs}`;
+        console.log(
+            "Generated auth URL (first 100 chars):",
+            authUrl.substring(0, 100)
+        );
+        res.json({ authUrl });
+    } catch (error: any) {
+        console.error("Error generating OAuth URL:", error);
+        res.status(500).json({
+            error: "Failed to generate OAuth URL",
+            details: error.message,
+        });
+    }
 });
 
 // Initiates Google OAuth flow (redirects to Google)
