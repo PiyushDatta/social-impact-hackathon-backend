@@ -14,6 +14,7 @@ import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import cookieParser from "cookie-parser";
 import fs from "fs";
 import path from "path";
+import FirestoreStore from "connect-session-firestore";
 
 interface ElevenLabsConversation {
     conversation_id: string;
@@ -72,17 +73,17 @@ app.use(
 
 // Update session config for mobile OAuth
 const sessionConfig: session.SessionOptions = {
-    secret: process.env.SESSION_SECRET || "dev-secret-change-in-production",
+    secret: process.env.SESSION_SECRET || "dev-secret",
     resave: false,
     saveUninitialized: false,
+    name: "sid",
     cookie: {
-        secure: true, // HTTPS in production
+        secure: true,
         httpOnly: true,
+        sameSite: "none",
         maxAge: 24 * 60 * 60 * 1000,
-        sameSite: "none", // Important for cross-origin requests
     },
     proxy: true,
-    name: "sid",
 };
 
 // Environment variables validation
@@ -121,6 +122,13 @@ if (!isProd) {
     );
     // Cloud Run/GCE/GKE automatically inject credentials
     db = new Firestore();
+}
+
+if (isProd) {
+    sessionConfig.store = new FirestoreStore({
+        dataset: db,
+        kind: "express-sessions",
+    });
 }
 
 app.use(session(sessionConfig));
