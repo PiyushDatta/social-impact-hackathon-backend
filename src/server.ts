@@ -49,9 +49,10 @@ const app = express();
 const host = process.env.HOST || "0.0.0.0";
 const port = process.env.PORT || 8080;
 const portNumber = typeof port === "string" ? parseInt(port, 10) : port;
+const isProd = process.env.NODE_ENV === "production";
 
 // Load .env file only in non-production environments
-if (process.env.NODE_ENV !== "production") {
+if (!isProd) {
     dotenv.config();
 }
 
@@ -84,17 +85,29 @@ if (missingVars.length > 0) {
     );
 }
 
-const serviceAccountPath = path.resolve("serviceAccountKey.json");
-const creds = JSON.parse(fs.readFileSync(serviceAccountPath, "utf8"));
-// Initialize Firestore
-const db = new Firestore({
-    projectId: creds.project_id,
-    credentials: {
-        client_email: creds.client_email,
-        private_key: creds.private_key,
-    },
-});
-console.log("Firestore initialized");
+let db: Firestore;
+if (!isProd) {
+    console.log("Running in development – using local service account key");
+    const serviceAccountPath = path.resolve("serviceAccountKey.json");
+    if (!fs.existsSync(serviceAccountPath)) {
+        console.error("Missing serviceAccountKey.json in development!");
+        process.exit(1);
+    }
+    const creds = JSON.parse(fs.readFileSync(serviceAccountPath, "utf8"));
+    db = new Firestore({
+        projectId: creds.project_id,
+        credentials: {
+            client_email: creds.client_email,
+            private_key: creds.private_key,
+        },
+    });
+} else {
+    console.log(
+        "Running in production – using Google Cloud default credentials"
+    );
+    // Cloud Run/GCE/GKE automatically inject credentials
+    db = new Firestore();
+}
 
 // Session configuration
 const sessionConfig: session.SessionOptions = {
@@ -102,18 +115,18 @@ const sessionConfig: session.SessionOptions = {
     resave: false,
     saveUninitialized: false,
     cookie: {
-        secure: process.env.NODE_ENV === "production", // keep true in prod
+        secure: isProd, // keep true in prod
         httpOnly: true,
         maxAge: 24 * 60 * 60 * 1000,
         // allow the cookie to be sent back through the proxy
-        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+        sameSite: isProd ? "none" : "lax",
     },
     // trust the proxy (Cloud Run / local-tunnel)
     proxy: true,
     name: "sid",
 };
 // Use Firestore for sessions in production (Cloud Run requires this)
-if (process.env.NODE_ENV === "production") {
+if (isProd) {
     const FirestoreStore = FirestoreStoreFactory(session);
     sessionConfig.store = new FirestoreStore({
         database: db,
