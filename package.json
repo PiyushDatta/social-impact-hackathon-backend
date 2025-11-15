@@ -22,6 +22,7 @@
     },
     "dependencies": {
         "@elevenlabs/elevenlabs-js": "^2.22.0",
+        "@google-cloud/connect-firestore": "^3.0.0",
         "@google-cloud/firestore": "^8.0.0",
         "@google/adk": "^0.1.3",
         "@types/cors": "^2.8.19",

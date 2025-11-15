@@ -14,7 +14,7 @@ import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import cookieParser from "cookie-parser";
 import fs from "fs";
 import path from "path";
-import FirestoreStore from "connect-session-firestore";
+import { FirestoreStore } from "@google-cloud/connect-firestore";
 
 interface ElevenLabsConversation {
     conversation_id: string;
