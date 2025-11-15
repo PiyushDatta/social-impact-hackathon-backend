@@ -12,7 +12,7 @@ import session from "express-session";
 import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import cookieParser from "cookie-parser";
-import * as FirestoreStoreFactory from "connect-session-firebase";
+import FirestoreStoreFactoryModule from "connect-firestore";
 import fs from "fs";
 import path from "path";
 
@@ -127,6 +127,8 @@ const sessionConfig: session.SessionOptions = {
 };
 // Use Firestore for sessions in production (Cloud Run requires this)
 if (isProd) {
+    const FirestoreStoreFactory =
+        FirestoreStoreFactoryModule.default ?? FirestoreStoreFactoryModule;
     const FirestoreStore = FirestoreStoreFactory(session);
     sessionConfig.store = new FirestoreStore({
         database: db,
