@@ -60,15 +60,30 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-// Enable CORS (allow localhost & Expo testing)
+// Update CORS configuration to support credentials
 app.use(
     cors({
-        origin: "*", // allow all origins during development
-        methods: ["GET", "POST", "OPTIONS"],
+        origin: true, // Allow all origins in development
+        methods: ["GET", "POST", "OPTIONS", "DELETE"],
         credentials: true,
         allowedHeaders: ["Content-Type", "Authorization"],
     })
 );
+
+// Update session config for mobile OAuth
+const sessionConfig: session.SessionOptions = {
+    secret: process.env.SESSION_SECRET || "dev-secret-change-in-production",
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+        secure: false,
+        httpOnly: true,
+        maxAge: 24 * 60 * 60 * 1000,
+        sameSite: "lax",
+    },
+    proxy: true,
+    name: "sid",
+};
 
 // Environment variables validation
 const requiredEnvVars = Object.keys(process.env).filter(
@@ -107,23 +122,6 @@ if (!isProd) {
     // Cloud Run/GCE/GKE automatically inject credentials
     db = new Firestore();
 }
-
-// Session configuration
-const sessionConfig: session.SessionOptions = {
-    secret: process.env.SESSION_SECRET || "dev-secret-change-in-production",
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-        secure: false,
-        httpOnly: true,
-        maxAge: 24 * 60 * 60 * 1000,
-        // allow the cookie to be sent back through the proxy
-        sameSite: "lax",
-    },
-    // trust the proxy (Cloud Run / local-tunnel)
-    proxy: true,
-    name: "sid",
-};
 
 app.use(session(sessionConfig));
 // Initialize Passport
@@ -946,23 +944,22 @@ app.get(
             // Update session with full user data
             req.user = userProfile;
 
-            // Return JSON for test script, redirect for browsers
-            if (req.headers["user-agent"]?.includes("python-requests")) {
-                res.json({
-                    success: true,
-                    user: userProfile,
-                    profileData,
-                    isNewUser,
-                });
-            } else {
-                res.redirect(`${process.env.BASE_URL}/?auth=success`);
-            }
+            // Encode user data in URL for mobile apps
+            const userParam = encodeURIComponent(JSON.stringify(userProfile));
+            const profileParam = encodeURIComponent(
+                JSON.stringify(profileData)
+            );
+
+            res.redirect(
+                `${process.env.BASE_URL}/?auth=success&user=${userParam}&profile=${profileParam}`
+            );
         } catch (error: any) {
             console.error("[OAuth Callback] Error:", error);
-            res.status(500).json({
-                error: "Failed to create/update user",
-                details: error.message,
-            });
+            res.redirect(
+                `${
+                    process.env.BASE_URL
+                }/?auth=error&message=${encodeURIComponent(error.message)}`
+            );
         }
     }
 );
