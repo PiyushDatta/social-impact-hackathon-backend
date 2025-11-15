@@ -76,10 +76,10 @@ const sessionConfig: session.SessionOptions = {
     resave: false,
     saveUninitialized: false,
     cookie: {
-        secure: false,
+        secure: true, // HTTPS in production
         httpOnly: true,
         maxAge: 24 * 60 * 60 * 1000,
-        sameSite: "lax",
+        sameSite: "none", // Important for cross-origin requests
     },
     proxy: true,
     name: "sid",
