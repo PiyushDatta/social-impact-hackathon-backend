@@ -1,322 +1,137 @@
-#!/usr/bin/env python3
-"""
-Google Authentication Testing Script with Real OAuth Flow
-Tests the /auth/google endpoint using actual Google sign-in
-Uses google-auth-oauthlib for proper OAuth flow
-"""
-
+import os
+import webbrowser
 import requests
-import json
-import sys
-from typing import Optional, Dict, Any
+import time
+from requests.exceptions import RequestException
+
+BASE_URL = os.getenv("BASE_URL", "http://localhost:8080")
+
+# Colors
+GREEN = "\033[92m"
+RED = "\033[91m"
+CYAN = "\033[96m"
+YELLOW = "\033[93m"
+RESET = "\033[0m"
 
 
-# Colors for terminal output
-class Colors:
-    GREEN = "\033[92m"
-    RED = "\033[91m"
-    YELLOW = "\033[93m"
-    BLUE = "\033[94m"
-    CYAN = "\033[96m"
-    MAGENTA = "\033[95m"
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
+def print_header(title):
+    print(f"\n{CYAN}{'='*60}\n{title}\n{'='*60}{RESET}")
 
 
-def print_header(text: str):
-    """Print a formatted header"""
-    print(f"\n{Colors.BOLD}{Colors.CYAN}{'=' * 70}{Colors.RESET}")
-    print(f"{Colors.BOLD}{Colors.CYAN}{text.center(70)}{Colors.RESET}")
-    print(f"{Colors.BOLD}{Colors.CYAN}{'=' * 70}{Colors.RESET}\n")
-
-
-def print_success(text: str):
-    """Print success message"""
-    print(f"{Colors.GREEN}✓ {text}{Colors.RESET}")
-
-
-def print_error(text: str):
-    """Print error message"""
-    print(f"{Colors.RED}✗ {text}{Colors.RESET}")
-
-
-def print_info(text: str):
-    """Print info message"""
-    print(f"{Colors.BLUE}ℹ {text}{Colors.RESET}")
-
-
-def print_warning(text: str):
-    """Print warning message"""
-    print(f"{Colors.YELLOW}⚠ {text}{Colors.RESET}")
-
-
-def print_response(response: requests.Response):
-    """Pretty print HTTP response"""
-    print(f"\n{Colors.BOLD}Response:{Colors.RESET}")
-    print(f"  Status Code: {response.status_code}")
-    try:
-        print(f"  Body: {json.dumps(response.json(), indent=2)}")
-    except:
-        print(f"  Body: {response.text[:500]}")
-
-
-def get_google_id_token_interactive(
-    client_id: str, client_secret: str
-) -> Optional[str]:
-    """
-    Get Google ID token using OAuth2 flow with google-auth-oauthlib
-    """
-    try:
-        from google_auth_oauthlib.flow import InstalledAppFlow
-    except ImportError:
-        print_error("Required library not found!")
-        print_info("Install it with: pip install google-auth-oauthlib")
-        return None
-
-    print_header("Google Sign-In via OAuth2")
-    print_info("Opening browser for Google sign-in...")
-
-    # Create client config
-    client_config = {
-        "installed": {
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": ["http://localhost:8181/", "urn:ietf:wg:oauth:2.0:oob"],
-        }
-    }
-
-    # Scopes that will give us an id_token
-    scopes = [
-        "openid",
-        "https://www.googleapis.com/auth/userinfo.email",
-        "https://www.googleapis.com/auth/userinfo.profile",
-    ]
+def test_backend_ready():
+    print_header("1. Checking backend health...")
 
     try:
-        # Create the flow
-        flow = InstalledAppFlow.from_client_config(
-            client_config, scopes=scopes, redirect_uri="http://localhost:8181/"
-        )
-
-        # Run local server to get credentials
-        print_info("Starting local server on port 8181...")
-        print_info("Your browser will open for Google sign-in")
-        print_info("Press Ctrl+C to cancel at any time")
-
-        credentials = flow.run_local_server(port=8181, open_browser=True)
-
-        # Get the ID token
-        id_token = credentials.id_token
-
-        if id_token:
-            print_success("Successfully obtained ID token!")
-            print_info(f"Token preview: {id_token[:50]}...")
-            return id_token
-        else:
-            print_error("No ID token in credentials")
-            return None
-
-    except KeyboardInterrupt:
-        print_info("\n\nCancelled by user")
-        return None
-    except Exception as e:
-        print_error(f"OAuth flow failed: {str(e)}")
-        return None
-
-
-def test_auth_missing_token(base_url: str) -> bool:
-    """Test auth endpoint with missing token"""
-    print_header("Test 1: Missing idToken")
-    print_info("Testing /auth/google with no idToken...")
-
-    try:
-        response = requests.post(f"{base_url}/auth/google", json={}, timeout=10)
-        print_response(response)
-
-        if response.status_code == 400:
-            data = response.json()
-            if "error" in data and "Missing idToken" in data["error"]:
-                print_success("Correctly rejected missing token")
-                return True
-            else:
-                print_error("Wrong error message")
-                return False
-        else:
-            print_error(f"Expected 400, got {response.status_code}")
-            return False
-
-    except Exception as e:
-        print_error(f"Error: {str(e)}")
-        return False
-
-
-def test_auth_invalid_token(base_url: str) -> bool:
-    """Test auth endpoint with invalid token"""
-    print_header("Test 2: Invalid idToken")
-    print_info("Testing /auth/google with fake token...")
-
-    try:
-        response = requests.post(
-            f"{base_url}/auth/google",
-            json={"idToken": "fake.invalid.token"},
-            timeout=10,
-        )
-        print_response(response)
-
-        if response.status_code in [401, 500]:
-            print_success("Correctly rejected invalid token")
+        # Use health check endpoint
+        r = requests.get(f"{BASE_URL}/health", timeout=5)
+        if r.status_code == 200:
+            print(f"{GREEN}Backend is reachable ✓{RESET}")
             return True
         else:
-            print_error(f"Expected 401 or 500, got {response.status_code}")
+            print(f"{RED}Unexpected status: {r.status_code}{RESET}")
+            print(f"{RED}Response: {r.text}{RESET}")
             return False
-
-    except Exception as e:
-        print_error(f"Error: {str(e)}")
+    except RequestException as e:
+        print(f"{RED}Backend not reachable: {e}{RESET}")
         return False
 
 
-def test_auth_valid_token(base_url: str, id_token: str) -> Optional[Dict[str, Any]]:
-    """Test auth endpoint with valid Google token"""
-    print_header("Test 3: Valid Google idToken")
-    print_info("Testing /auth/google with real token...")
-    full_url = f"{base_url}/auth/google"
-    print(f"Sending token to full url ({full_url}), {id_token[:40]}")
+def extract_google_url():
+    print_header("2. Requesting Google OAuth login URL...")
+
     try:
-        response = requests.post(
-            full_url,
-            json={"idToken": id_token},   # ✅ correct
-            timeout=10,
-        )
-        print_response(response)
-
-        if response.status_code == 200:
-            data = response.json()
-
-            # Validate response structure
-            required_fields = ["success", "isNewUser", "profile"]
-            missing_fields = [f for f in required_fields if f not in data]
-
-            if missing_fields:
-                print_error(f"Missing fields: {missing_fields}")
-                return None
-
-            profile = data.get("profile", {})
-            print_success("Authentication successful!")
-            print_info(f"User ID: {profile.get('uid')}")
-            print_info(f"Email: {profile.get('email')}")
-            print_info(f"Name: {profile.get('name')}")
-            print_info(f"Is New User: {data.get('isNewUser')}")
-
-            return data
-        else:
-            print_error(f"Authentication failed: {response.status_code}")
-            return None
-
+        r = requests.get(f"{BASE_URL}/auth/google/url", timeout=10)
     except Exception as e:
-        print_error(f"Error: {str(e)}")
+        print(f"{RED}Request failed: {e}{RESET}")
         return None
+
+    if r.status_code != 200:
+        print(f"{RED}Bad status: {r.status_code}{RESET}")
+        print(f"{RED}Response: {r.text}{RESET}")
+        return None
+
+    try:
+        data = r.json()
+    except Exception as e:
+        print(f"{RED}Invalid JSON: {e}{RESET}")
+        print(f"{RED}Raw: {r.text}{RESET}")
+        return None
+
+    auth_url = data.get("authUrl")
+    if not auth_url:
+        print(f"{RED}No authUrl in response{RESET}")
+        print(f"{RED}Data: {data}{RESET}")
+        return None
+
+    print(f"{GREEN}Received Google OAuth URL ✓{RESET}")
+    print(f"{YELLOW}{auth_url}{RESET}")
+
+    return auth_url
+
+
+def open_browser_for_login(url):
+    print_header("3. Launching browser — complete Google login manually")
+
+    print(
+        f"{YELLOW}Complete the Google login in your browser.\n"
+        f"After you see 'auth=success' in the URL or a success message,\n"
+        f"press ENTER here to continue.{RESET}"
+    )
+
+    webbrowser.open(url)
+    input("\nPress ENTER after completing Google login... ")
+
+
+def test_session(session):
+    print_header("4. Testing authenticated session (/auth/me)...")
+
+    try:
+        r = session.get(f"{BASE_URL}/auth/me")
+    except Exception as e:
+        print(f"{RED}Failed to call /auth/me: {e}{RESET}")
+        return False
+
+    if r.status_code == 200:
+        print(f"{GREEN}Authenticated session works ✓{RESET}")
+        print(f"{CYAN}User info:{RESET} {r.json()}")
+        return True
+    else:
+        print(f"{RED}Session invalid — status {r.status_code}{RESET}")
+        print(f"{RED}Response: {r.text}{RESET}")
+        return False
 
 
 def main():
-    """Main entry point"""
-    import argparse
+    print_header("Google OAuth Login Test")
 
-    parser = argparse.ArgumentParser(
-        description="Test Google authentication endpoint with real OAuth",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Test with interactive Google sign-in
-  python test_auth.py --client-id YOUR_ID --client-secret YOUR_SECRET
-  
-  # Test with custom server URL
-  python test_auth.py --url https://your-api.com --client-id YOUR_ID --client-secret YOUR_SECRET
-  
-  # Skip interactive sign-in (validation tests only)
-  python test_auth.py --skip-signin
+    # Test 1: Backend health
+    if not test_backend_ready():
+        print(f"{RED}Backend not ready. Exiting.{RESET}")
+        return
 
-Setup:
-  1. Install: pip install google-auth-oauthlib requests
-  2. Get your credentials from Google Cloud Console:
-     - Go to APIs & Services → Credentials
-     - Create OAuth 2.0 Client ID (Desktop app)
-     - Add http://localhost:8181/ as authorized redirect URI (note the trailing slash!)
-  3. Run with --client-id and --client-secret
-        """,
-    )
-    parser.add_argument(
-        "--url",
-        default="http://localhost:8080",
-        help="Base URL of your API (default: http://localhost:8080)",
-    )
-    parser.add_argument(
-        "--client-id",
-        help="Google OAuth Client ID (required for interactive sign-in)",
-        default=None,
-    )
-    parser.add_argument(
-        "--client-secret",
-        help="Google OAuth Client Secret (required for interactive sign-in)",
-        default=None,
-    )
-    parser.add_argument(
-        "--skip-signin",
-        action="store_true",
-        help="Skip interactive sign-in (validation tests only)",
-    )
+    # Create session to persist cookies
+    session = requests.Session()
 
-    args = parser.parse_args()
-    base_url = args.url.rstrip("/")
+    # Test 2: Get auth URL
+    google_url = extract_google_url()
+    if not google_url:
+        print(f"{RED}Failed to get auth URL. Exiting.{RESET}")
+        return
 
-    print(f"\n{Colors.BOLD}{Colors.BLUE}")
-    print("╔═══════════════════════════════════════════════════════════════════╗")
-    print("║              Google Authentication Test Suite                    ║")
-    print("╚═══════════════════════════════════════════════════════════════════╝")
-    print(f"{Colors.RESET}")
+    # Test 3: Open browser
+    open_browser_for_login(google_url)
 
-    print_info(f"Base URL: {base_url}")
+    # Wait for session to be established
+    time.sleep(3)
 
-    # Test 1: Missing token
-    test_auth_missing_token(base_url)
+    # Test 4: Check authentication
+    success = test_session(session)
 
-    # Test 2: Invalid token
-    test_auth_invalid_token(base_url)
-
-    # Test 3: Valid token (interactive)
-    if not args.skip_signin:
-        if not args.client_id or not args.client_secret:
-            print_warning("\nMissing --client-id or --client-secret")
-            print_info("To test with real Google sign-in, you need both:")
-            print_info(
-                "  python test_auth.py --client-id YOUR_ID --client-secret YOUR_SECRET"
-            )
-            print_info(
-                "\nGet these from: https://console.cloud.google.com/apis/credentials"
-            )
-            print_header("Basic Validation Tests Passed!")
-            sys.exit(0)
-
-        print_info(f"Using Client ID: {args.client_id[:30]}...")
-
-        id_token = get_google_id_token_interactive(args.client_id, args.client_secret)
-
-        if id_token:
-            result = test_auth_valid_token(base_url, id_token)
-            if result:
-                print_header("All Tests Passed! ✓")
-                sys.exit(0)
-            else:
-                print_error("Valid token test failed")
-                sys.exit(1)
-        else:
-            print_error("Failed to obtain Google ID token")
-            sys.exit(1)
+    print_header("Test Complete")
+    if success:
+        print(f"{GREEN}✓ OAuth flow is fully working!{RESET}")
     else:
-        print_warning("\nSkipping interactive sign-in test (--skip-signin)")
-        print_header("Basic Validation Tests Passed!")
-        sys.exit(0)
+        print(f"{RED}✗ OAuth flow failed. Check errors above.{RESET}")
 
 
 if __name__ == "__main__":

@@ -8,6 +8,13 @@ import { v4 as uuidv4 } from "uuid";
 import { Firestore } from "@google-cloud/firestore";
 import { IntakeSessionDoc, IntakeFormData } from "./intakeFormData";
 import { OAuth2Client } from "google-auth-library";
+import session from "express-session";
+import passport from "passport";
+import { Strategy as GoogleStrategy } from "passport-google-oauth20";
+import cookieParser from "cookie-parser";
+import * as FirestoreStoreFactory from "connect-session-firebase";
+import fs from "fs";
+import path from "path";
 
 interface ElevenLabsConversation {
     conversation_id: string;
@@ -51,12 +58,14 @@ if (process.env.NODE_ENV !== "production") {
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 
 // Enable CORS (allow localhost & Expo testing)
 app.use(
     cors({
         origin: "*", // allow all origins during development
         methods: ["GET", "POST", "OPTIONS"],
+        credentials: true,
         allowedHeaders: ["Content-Type", "Authorization"],
     })
 );
@@ -75,8 +84,90 @@ if (missingVars.length > 0) {
     );
 }
 
+const serviceAccountPath = path.resolve("serviceAccountKey.json");
+const creds = JSON.parse(fs.readFileSync(serviceAccountPath, "utf8"));
 // Initialize Firestore
-const db = new Firestore();
+const db = new Firestore({
+    projectId: creds.project_id,
+    credentials: {
+        client_email: creds.client_email,
+        private_key: creds.private_key,
+    },
+});
+console.log("Firestore initialized");
+
+// Session configuration
+const sessionConfig: session.SessionOptions = {
+    secret: process.env.SESSION_SECRET || "dev-secret-change-in-production",
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+        secure: process.env.NODE_ENV === "production", // keep true in prod
+        httpOnly: true,
+        maxAge: 24 * 60 * 60 * 1000,
+        // allow the cookie to be sent back through the proxy
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    },
+    // trust the proxy (Cloud Run / local-tunnel)
+    proxy: true,
+    name: "sid",
+};
+// Use Firestore for sessions in production (Cloud Run requires this)
+if (process.env.NODE_ENV === "production") {
+    const FirestoreStore = FirestoreStoreFactory(session);
+    sessionConfig.store = new FirestoreStore({
+        database: db,
+        collection: "sessions",
+    });
+}
+app.use(session(sessionConfig));
+// Initialize Passport
+app.use(passport.initialize());
+app.use(passport.session());
+// Passport Google OAuth configuration
+passport.use(
+    new GoogleStrategy(
+        {
+            clientID: process.env.GOOGLE_WEB_CLIENT_ID!,
+            clientSecret: process.env.GOOGLE_WEB_CLIENT_SECRET!,
+            callbackURL: `${process.env.BASE_URL}/auth/google/callback`,
+        },
+        async (accessToken, refreshToken, profile, done) => {
+            try {
+                // Just verify and return profile - NO Firestore here
+                const userProfile: UserProfile = {
+                    uid: profile.id,
+                    email: profile.emails?.[0]?.value || "",
+                    name: profile.displayName || "",
+                    photo: profile.photos?.[0]?.value,
+                };
+                return done(null, userProfile);
+            } catch (err: any) {
+                console.error("GoogleStrategy error:", err);
+                return done(err, null);
+            }
+        }
+    )
+);
+
+// Serialize user to session
+passport.serializeUser((user: any, done: any) => {
+    done(null, user.uid);
+});
+
+passport.deserializeUser(async (uid: string, done) => {
+    try {
+        const userDoc = await db.collection("users").doc(uid).get();
+        if (userDoc.exists) {
+            done(null, userDoc.data());
+        } else {
+            done(new Error("User not found"), null);
+        }
+    } catch (error) {
+        console.error(`[Passport] Deserialize error for ${uid}:`, error);
+        done(error, null);
+    }
+});
 
 // Initialize google auth client
 const googleClient = new OAuth2Client(process.env.GOOGLE_WEB_CLIENT_ID);
@@ -191,52 +282,81 @@ async function extractAndStoreFormDataInBackground({
     }
 }
 
-// Helper function to add or get user from database
-async function addOrGetUser(
-    profile: UserProfile
-): Promise<{ isNewUser: boolean; profile: UserProfile; profileData?: any }> {
-    const userRef = db.collection("users").doc(profile.uid);
-    const profileRef = db.collection("profiles").doc(profile.uid);
-    const userDoc = await userRef.get();
-    const profileDoc = await profileRef.get();
-    let isNewUser = false;
-    let userProfile: UserProfile;
-    let profileData: any = null;
-    if (!userDoc.exists) {
-        // Create user for new user
-        isNewUser = true;
-        userProfile = {
-            ...profile,
-            createdAt: profile.createdAt || Date.now(),
-        };
-        await userRef.set(userProfile);
-        // Create default profile data for new user
-        const defaultProfileData = {
-            userId: profile.uid,
-            onboardingComplete: false,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-        };
-        await profileRef.set(defaultProfileData);
-        profileData = defaultProfileData;
-    } else {
-        userProfile = userDoc.data() as UserProfile;
-        // Get existing profile data or create if missing
-        if (profileDoc.exists) {
-            profileData = profileDoc.data();
-        } else {
-            // User exists but profile doesn't - create default profile
+async function addOrGetUser(profile: UserProfile): Promise<{
+    isNewUser: boolean;
+    profile: UserProfile;
+    profileData?: any;
+}> {
+    const { uid } = profile;
+
+    console.log(`[addOrGetUser] START – uid: ${uid}`);
+
+    try {
+        const userRef = db.collection("users").doc(uid);
+        const profileRef = db.collection("profiles").doc(uid);
+
+        console.log("[addOrGetUser] Fetching documents...");
+        const [userDoc, profileDoc] = await Promise.all([
+            userRef.get(),
+            profileRef.get(),
+        ]);
+
+        console.log(
+            `[addOrGetUser] userDoc.exists: ${userDoc.exists}, profileDoc.exists: ${profileDoc.exists}`
+        );
+
+        let isNewUser = false;
+        let userProfile: UserProfile;
+        let profileData: any = null;
+
+        if (!userDoc.exists) {
+            isNewUser = true;
+            userProfile = {
+                ...profile,
+                createdAt: profile.createdAt || Date.now(),
+            };
+
+            console.log("[addOrGetUser] Creating new user...");
+            await userRef.set(userProfile);
+
             const defaultProfileData = {
-                userId: profile.uid,
+                userId: uid,
                 onboardingComplete: false,
                 createdAt: Date.now(),
                 updatedAt: Date.now(),
             };
+
+            console.log("[addOrGetUser] Creating default profile...");
             await profileRef.set(defaultProfileData);
             profileData = defaultProfileData;
+
+            console.log(`[addOrGetUser] Created new user: ${uid}`);
+        } else {
+            userProfile = userDoc.data() as UserProfile;
+            console.log(`[addOrGetUser] Found existing user: ${uid}`);
+            if (profileDoc.exists) {
+                profileData = profileDoc.data();
+                console.log("[addOrGetUser] Found existing profile");
+            } else {
+                console.log("[addOrGetUser] No profile, creating default...");
+                const defaultProfileData = {
+                    userId: uid,
+                    onboardingComplete: false,
+                    createdAt: Date.now(),
+                    updatedAt: Date.now(),
+                };
+                await profileRef.set(defaultProfileData);
+                profileData = defaultProfileData;
+            }
         }
+        console.log(
+            `[addOrGetUser] COMPLETE – uid: ${uid}, isNewUser: ${isNewUser}`
+        );
+        return { isNewUser, profile: userProfile, profileData };
+    } catch (error) {
+        console.error(`[addOrGetUser] ERROR for uid ${uid}:`, error);
+        throw error;
     }
-    return { isNewUser, profile: userProfile, profileData };
 }
 
 // Google OAuth verification endpoint
@@ -777,6 +897,95 @@ app.delete(
         }
     }
 );
+
+// --- OAuth Routes for Web Browser Flow ---
+
+// Returns the Google OAuth URL (for test script)
+app.get("/auth/google/url", (req, res) => {
+    const rootUrl = "https://accounts.google.com/o/oauth2/v2/auth";
+    const options = {
+        client_id: process.env.GOOGLE_WEB_CLIENT_ID,
+        redirect_uri: `${process.env.BASE_URL}/auth/google/callback`,
+        access_type: "offline",
+        response_type: "code",
+        prompt: "consent",
+        scope: ["profile", "email"].join(" "),
+    };
+    const qs = new URLSearchParams(options).toString();
+    const authUrl = `${rootUrl}?${qs}`;
+    res.json({ authUrl });
+});
+
+// Initiates Google OAuth flow (redirects to Google)
+app.get(
+    "/auth/google",
+    passport.authenticate("google", { scope: ["profile", "email"] })
+);
+
+// Google OAuth callback
+app.get(
+    "/auth/google/callback",
+    passport.authenticate("google", { failureRedirect: "/auth/failure" }),
+    async (req, res) => {
+        try {
+            const profile = req.user as UserProfile;
+            console.log(`[OAuth Callback] Processing user: ${profile.uid}`);
+
+            // Handle Firestore user creation
+            const {
+                isNewUser,
+                profile: userProfile,
+                profileData,
+            } = await addOrGetUser(profile);
+
+            // Update session with full user data
+            req.user = userProfile;
+
+            // Return JSON for test script, redirect for browsers
+            if (req.headers["user-agent"]?.includes("python-requests")) {
+                res.json({
+                    success: true,
+                    user: userProfile,
+                    profileData,
+                    isNewUser,
+                });
+            } else {
+                res.redirect(`${process.env.BASE_URL}/?auth=success`);
+            }
+        } catch (error: any) {
+            console.error("[OAuth Callback] Error:", error);
+            res.status(500).json({
+                error: "Failed to create/update user",
+                details: error.message,
+            });
+        }
+    }
+);
+
+// Get current user session
+app.get("/auth/me", (req, res) => {
+    if (req.isAuthenticated()) {
+        res.json({ authenticated: true, user: req.user });
+    } else {
+        res.status(401).json({
+            authenticated: false,
+            error: "Not authenticated",
+        });
+    }
+});
+
+// OAuth failure handler
+app.get("/auth/failure", (req, res) => {
+    res.status(401).json({ error: "Authentication failed" });
+});
+
+// Logout
+app.post("/auth/logout", (req, res) => {
+    req.logout((err) => {
+        if (err) return res.status(500).json({ error: "Logout failed" });
+        res.json({ success: true, message: "Logged out" });
+    });
+});
 
 // Start server
 app.listen(portNumber, host, () => {
